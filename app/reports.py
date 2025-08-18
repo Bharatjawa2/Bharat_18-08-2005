@@ -21,7 +21,7 @@ def read_tz(): return pd.read_sql("SELECT * FROM timezones", sqlite3.connect(DB_
 def max_poll_time(polls):
     return polls["timestamp_utc"].max()
 
-def compute_uptime_for_store(store, polls, bh_store, tz_str, now):
+def compute_uptime_for_store(store, polls_store, bh_store, tz_str, now):
     tz = ZoneInfo(tz_str or "America/Chicago")
     intervals = {
         "hour": (now - pd.Timedelta(hours=1), now),
@@ -29,7 +29,6 @@ def compute_uptime_for_store(store, polls, bh_store, tz_str, now):
         "week": (now - pd.Timedelta(days=7), now)
     }
     results={}
-    polls_store = polls[polls["store_id"]==store]
     segments = build_status_segments(polls_store)
 
     for k,(s,e) in intervals.items():
@@ -54,14 +53,22 @@ def generate_report(report_id):
     conn.execute("UPDATE reports SET status=? WHERE report_id=?",("Running",report_id)); conn.commit()
     try:
         polls, bh, tzs = read_polls(), read_bh(), read_tz()
-        now=max_poll_time(polls)
-        stores = pd.concat([polls["store_id"],bh["store_id"],tzs["store_id"]]).unique()
-        rows=[]
-        for store in stores:
-            tz_row=tzs[tzs["store_id"]==store]
-            tz_str=tz_row["timezone_str"].iloc[0] if not tz_row.empty else "America/Chicago"
-            bh_store=bh[bh["store_id"]==store]
-            rows.append(compute_uptime_for_store(store,polls,bh_store,tz_str,now))
+        now = max_poll_time(polls)
+        cutoff = now - pd.Timedelta(days=8)
+        polls = polls[polls["timestamp_utc"] >= cutoff]
+
+        polls_groups = {sid: df[["timestamp_utc","status"]].copy() for sid, df in polls.groupby("store_id")}
+        bh_groups = {sid: df.copy() for sid, df in bh.groupby("store_id")}
+        tz_map = dict(zip(tzs["store_id"], tzs["timezone_str"]))
+
+        store_ids = set(polls_groups.keys()) | set(bh_groups.keys()) | set(tz_map.keys())
+        empty_polls = pd.DataFrame(columns=["timestamp_utc","status"])
+        rows = []
+        for store in store_ids:
+            tz_str = tz_map.get(store, "America/Chicago")
+            polls_store = polls_groups.get(store, empty_polls)
+            bh_store = bh_groups.get(store, bh.iloc[0:0])
+            rows.append(compute_uptime_for_store(store, polls_store, bh_store, tz_str, now))
         out=pd.DataFrame(rows)
         path=os.path.join(REPORTS_DIR,f"{report_id}.csv")
         out.to_csv(path,index=False)
