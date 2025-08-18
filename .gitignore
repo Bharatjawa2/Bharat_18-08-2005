@@ -10,7 +10,8 @@ venv/
 # macOS
 .DS_Store
 
-# SQLite database
+# Data and database
+/data/
 /data.db
 
 # Reports
