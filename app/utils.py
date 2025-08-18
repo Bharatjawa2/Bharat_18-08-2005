@@ -77,3 +77,43 @@ def interpolate_status(polls, wstart, wend):
             if status.lower()=="active": up+=secs
             else: down+=secs
     return up,down
+
+def build_status_segments(polls):
+    if polls.empty:
+        return []
+    polls = polls.sort_values("timestamp_utc").reset_index(drop=True)
+    times = list(polls["timestamp_utc"])
+    statuses = [str(s).lower() for s in list(polls["status"])]
+    intervals = []
+    for i, current_time in enumerate(times):
+        if i == 0:
+            seg_start = current_time - pd.Timedelta(days=365)
+        else:
+            prev_time = times[i-1]
+            seg_start = prev_time + (current_time - prev_time) / 2
+        if i == len(times) - 1:
+            seg_end = current_time + pd.Timedelta(days=365)
+        else:
+            next_time = times[i+1]
+            seg_end = current_time + (next_time - current_time) / 2
+        intervals.append((seg_start, seg_end, statuses[i]))
+    return intervals
+
+def accumulate_overlap_seconds(segments, wstart, wend):
+    if not segments:
+        return 0, (wend - wstart).total_seconds()
+    up, down = 0, 0
+    for seg_start, seg_end, status in segments:
+        if seg_end <= wstart:
+            continue
+        if seg_start >= wend:
+            break
+        inter_start = max(seg_start, wstart)
+        inter_end = min(seg_end, wend)
+        if inter_end > inter_start:
+            secs = (inter_end - inter_start).total_seconds()
+            if status == "active":
+                up += secs
+            else:
+                down += secs
+    return up, down

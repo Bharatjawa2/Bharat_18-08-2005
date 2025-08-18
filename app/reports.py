@@ -2,7 +2,7 @@ import sqlite3, os, uuid, pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .db import DB_PATH
-from .utils import build_business_windows, interpolate_status
+from .utils import build_business_windows, build_status_segments, accumulate_overlap_seconds
 
 REPORTS_DIR = "reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -30,13 +30,13 @@ def compute_uptime_for_store(store, polls, bh_store, tz_str, now):
     }
     results={}
     polls_store = polls[polls["store_id"]==store]
+    segments = build_status_segments(polls_store)
 
     for k,(s,e) in intervals.items():
         windows = build_business_windows(store, tz, bh_store, s, e)
         up,down=0,0
         for wstart,wend in windows:
-            cpolls = polls_store[(polls_store["timestamp_utc"] >= (wstart - timedelta(days=1))) & (polls_store["timestamp_utc"] <= (wend + timedelta(days=1)))]
-            u,d = interpolate_status(cpolls,wstart,wend)
+            u,d = accumulate_overlap_seconds(segments, wstart, wend)
             up+=u; down+=d
         results[k]=(round(up/3600,3),round(down/3600,3), int(round(up/60)), int(round(down/60)))
     return {
